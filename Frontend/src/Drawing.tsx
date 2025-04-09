@@ -2,9 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import './canvas.css';
 
 import axios from 'axios';
+import 'katex/dist/katex.min.css';
+import { BlockMath } from 'react-katex';
 
 declare const fabric: any;
 
+//#region svg Icon conts  
 // SVG Icons as components
 const PencilIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
@@ -93,12 +96,28 @@ const ZoomOutIcon = () => (
   </svg>
 );
 
+//#endregion
+
+const cleanGeminiResponse = (response: string): string => {
+  // Remove latex code block markers
+  let cleaned = response.replace(/```latex|```/g, '');
+  
+  // Remove dollar sign delimiters (both single $ and double $$)
+  cleaned = cleaned.replace(/\${1,2}(.*?)\${1,2}/g, '$1');
+  
+  // If the entire string is wrapped in dollar signs, remove them
+  cleaned = cleaned.replace(/^\$\$(.*)\$\$$/s, '$1');
+  cleaned = cleaned.replace(/^\$(.*)\$$/s, '$1');
+  
+  return cleaned.trim();
+};
+
 const DrawingApp: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [canvas, setCanvas] = useState<any>(null);
   const [drawingMode, setDrawingMode] = useState<'pencil' | 'eraser' | 'selection' | 'lasso' | 'pan'>('pencil');
-  const [brushSize, setBrushSize] = useState<number>(5);
+  const [brushSize, setBrushSize] = useState<number>(1);
   const [brushColor] = useState<string>('#FFFFFF'); // Changed default brush color to white
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
@@ -108,8 +127,12 @@ const DrawingApp: React.FC = () => {
   const [viewportTransform, setViewportTransform] = useState<number[]>([1, 0, 0, 1, 0, 0]);
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const lastPosRef = useRef<{x: number, y: number} | null>(null);
+  const [geminiResponse, setGeminiResponse] = useState<string>("");
+  const [showLatexOutput, setShowLatexOutput] = useState<boolean>(false);
+  const [cleanedLatex, setCleanedLatex] = useState<string>("");
+  const [latexError, setLatexError] = useState<string>("");
 
-  const CANVAS_SIZE = 5000; // Large canvas size to simulate "infinite" space
+  const CANVAS_SIZE = 10000; // Large canvas size to simulate "infinite" space
 
   interface Point {
     x: number;
@@ -118,7 +141,6 @@ const DrawingApp: React.FC = () => {
 
 
   const calculateCanvasDimensions = () => {
-    // Use the full window dimensions for the canvas
     return {
       width: window.innerWidth,
       height: window.innerHeight
@@ -140,6 +162,7 @@ const DrawingApp: React.FC = () => {
     canvas.renderAll();
   };
 
+  //Select Tool To use 
   const handleSetDrawingMode = (mode: 'pencil' | 'eraser' | 'selection' | 'lasso' | 'pan') => {
     if (mode !== 'lasso' && lassoCompleted) {
       removeAllLassoElements();
@@ -247,6 +270,7 @@ const DrawingApp: React.FC = () => {
       obj.visible = false;
     });
     canvas.renderAll();
+
     const dataUrl = canvas.toDataURL({
       format: "png",
       left: bounds.left,
@@ -263,8 +287,21 @@ const DrawingApp: React.FC = () => {
       );
 
       console.log("Response:", response.data);
+      setGeminiResponse(response.data.gemini_response || "No response from Gemini");
+
+      // Process LaTeX response
+      const latex = response.data.gemini_response || "";
+      try {
+        setCleanedLatex(latex);
+        setLatexError("");
+      } catch (error) {
+        console.error("Error processing LaTeX:", error);
+        setLatexError("Error processing LaTeX.");
+      }
+      setShowLatexOutput(true);
     } catch (error) {
       console.error("Error sending lasso selection:", error);
+      setGeminiResponse("Error processing the request.");
     }
   };
 
@@ -612,7 +649,7 @@ const DrawingApp: React.FC = () => {
         canvas.viewportTransform = previousState.viewportTransform;
         setViewportTransform(previousState.viewportTransform);
       }
-      
+      canvas.backgroundColor = '#000000'; // Restore background color
       canvas.renderAll();
       setHistoryIndex(newIndex);
     });
@@ -631,7 +668,7 @@ const DrawingApp: React.FC = () => {
         canvas.viewportTransform = nextState.viewportTransform;
         setViewportTransform(nextState.viewportTransform);
       }
-      
+      canvas.backgroundColor = '#000000'; 
       canvas.renderAll();
       setHistoryIndex(newIndex);
     });
@@ -693,14 +730,17 @@ const DrawingApp: React.FC = () => {
     setHistoryIndex(prev => prev + 1);
   };
 
+  useEffect(() => {
+    if (geminiResponse) {
+      const cleaned = cleanGeminiResponse(geminiResponse);
+      setCleanedLatex(cleaned);
+    }
+  }, [geminiResponse]);
+
   return (
 
     <>
 
-   
-
-      
-    
     <div className="app-container">
     
       <div className="toolbar">
@@ -776,7 +816,7 @@ const DrawingApp: React.FC = () => {
         </div>
 
         {/* History Controls */}
-        <div className="toolbar-section">
+        <div className="toolbar-section ">
           <button className="btn btn-compact" onClick={handleUndo} title="Undo">
             <UndoIcon />
           </button>
@@ -788,9 +828,13 @@ const DrawingApp: React.FC = () => {
           </button>
         </div>
 
-        {/* Lasso Tools (Conditional) */}
-        {lassoCompleted && (
-          <div className="toolbar-section">
+       
+      </div>
+
+      <div className='toolbar-vertical'>
+         {/* Lasso Tools (Conditional) */}
+         {lassoCompleted && (
+          <div className="toolbar-section-vertical ">
             <button className="btn btn-compact" onClick={handlePngDownload} title="Download PNG">
               <DownloadIcon />
             </button>
@@ -799,6 +843,7 @@ const DrawingApp: React.FC = () => {
             </button>
           </div>
         )}
+
       </div>
 
       <div className="canvas-container" ref={canvasContainerRef}>
@@ -810,8 +855,71 @@ const DrawingApp: React.FC = () => {
         </div>
       </div>
 
+      {/* LaTeX Output Window */}
+      {showLatexOutput && (
+        <div className="latex-output-window">
+          <div className="latex-header">
+            <h3>LaTeX Output</h3>
+            <button 
+              className="btn btn-compact"
+              onClick={() => setShowLatexOutput(false)}
+              title="Close"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+              </svg>
+            </button>
+          </div>
+          
+          <div className="latex-content">
+            {latexError ? (
+              <div className="error-container">
+                <p className="error-message">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" className="error-icon">
+                    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                    <path d="M7.002 11a1 1 0 1 1 2 0 1 1 0 0 1-2 0zM7.1 4.995a.905.905 0 1 1 1.8 0l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 4.995z"/>
+                  </svg>
+                  {latexError}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="latex-preview">
+                  <BlockMath math={cleanedLatex} />
+                </div>
+                <div className="latex-code-container">
+                  <pre className="latex-code">{cleanedLatex}</pre>
+                  <button 
+                    className="btn btn-compact copy-btn"
+                    onClick={() => {
+                      navigator.clipboard.writeText(cleanedLatex);
+                      // Optional: Add visual feedback for copy
+                      const copyBtn = document.querySelector('.copy-btn');
+                      if (copyBtn) {
+                        const originalText = copyBtn.textContent;
+                        copyBtn.textContent = 'Copied!';
+                        setTimeout(() => {
+                          copyBtn.textContent = originalText;
+                        }, 1500);
+                      }
+                    }}
+                    title="Copy to clipboard"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                      <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
+                      <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
+                    </svg>
+                    Copy
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="shortcuts">
-        Keyboard shortcuts: <kbd>Ctrl</kbd> + <kbd>Z</kbd> for Undo, <kbd>Ctrl</kbd> + <kbd>Y</kbd> for Redo, <kbd>Space</kbd> (hold) for Pan
+        Keyboard shortcuts: <kbd className='text-blue-200'>Ctrl</kbd> + <kbd>Z</kbd> for Undo, <kbd>Ctrl</kbd> + <kbd>Y</kbd> for Redo, <kbd>Space</kbd> (hold) for Pan
       </div>
     </div>
     </>
