@@ -1,0 +1,166 @@
+/* LaTeX Output Window Styles */
+.latex-output-window {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, 50%);
+  width: 30%;
+  max-width: 800px;
+  max-height: 80vh;
+  background: rgba(21, 21, 23, 0.95);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  border-radius: var(--border-radius-lg);
+  padding: 20px;
+  z-index: 1000;
+  box-shadow: var(--shadow-lg), 0 0 25px rgba(0, 229, 255, 0.15);
+  overflow-y: auto;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  backdrop-filter: blur(10px);
+  transition: height 0.3s ease-in-out;
+}
+
+.latex-output-window.collapsed {
+  height: auto !important;
+  overflow: hidden;
+}
+
+.latex-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.15);
+  padding-bottom: 10px;
+}
+
+.latex-header h3 {
+  margin: 0;
+  color: var(--primary);
+  font-size: 1.2rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.window-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.window-control-btn {
+  background: transparent;
+  border: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.window-control-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  transform: translateY(-1px);
+}
+
+.collapse-btn:hover {
+  color: var(--primary);
+}
+
+.close-btn:hover {
+  color: var(--danger);
+}
+
+.latex-content {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.latex-preview {
+  background: rgba(32, 34, 48, 0.6);
+  padding: 20px;
+  border-radius: var(--border-radius);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.latex-code-container {
+  position: relative;
+  background: rgba(16, 16, 20, 0.7);
+  border-radius: var(--border-radius);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.latex-code {
+  padding: 15px;
+  margin: 0;
+  overflow-x: auto;
+  font-family: 'Fira Code', 'Courier New', monospace;
+  font-size: 0.9rem;
+  color: #e0e0e0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.copy-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 229, 255, 0.2);
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: var(--border-radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.copy-btn:hover {
+  background: rgba(0, 229, 255, 0.3);
+  transform: translateY(-2px);
+  box-shadow: var(--glow), 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.copy-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.error-container {
+  background: rgba(255, 23, 68, 0.1);
+  border-left: 3px solid var(--danger);
+  padding: 12px;
+  border-radius: var(--border-radius-sm);
+}
+
+.error-message {
+  color: #ff6b6b;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.error-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+/* KaTeX styling overrides to match dark theme */
+.katex {
+  color: #e0e0e0;
+}

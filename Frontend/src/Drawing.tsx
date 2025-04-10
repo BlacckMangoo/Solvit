@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './canvas.css';
-
 import axios from 'axios';
 import 'katex/dist/katex.min.css';
-import { BlockMath } from 'react-katex';
+import LatexOutputWindow from './latex-window';
 
 declare const fabric: any;
 
@@ -91,12 +90,14 @@ const ZoomInIcon = () => (
 const ZoomOutIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
     <path fillRule="evenodd" d="M6.5 12a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11zM13 6.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0z"/>
-    <path d="M10.344 11.742c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1 6.538 6.538 0 0 1-1.398 1.4z"/>
+    <path d="M10.344 11.742c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a.007.007 0 0 0-.115-.1 6.538 6.538 0 0 1-1.398 1.4z"/>
     <path fillRule="evenodd" d="M3 6.5a.5.5 0 0 1 .5-.5h6a.5.5 0 0 1 0 1h-6a.5.5 0 0 1-.5-.5z"/>
   </svg>
 );
 
 //#endregion
+
+
 
 const cleanGeminiResponse = (response: string): string => {
   // Remove latex code block markers
@@ -121,6 +122,7 @@ const DrawingApp: React.FC = () => {
   const [brushColor] = useState<string>('#FFFFFF'); // Changed default brush color to white
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  const MAX_HISTORY_SIZE = 5; // Store maximum 5 states (current + 2 back + 2 forward)
   const [lassoCompleted, setLassoCompleted] = useState<boolean>(false);
   const [canvasDimensions, setCanvasDimensions] = useState({ width: 0, height: 0 });
   const [zoomLevel, setZoomLevel] = useState<number>(1);
@@ -130,7 +132,7 @@ const DrawingApp: React.FC = () => {
   const [geminiResponse, setGeminiResponse] = useState<string>("");
   const [showLatexOutput, setShowLatexOutput] = useState<boolean>(false);
   const [cleanedLatex, setCleanedLatex] = useState<string>("");
-  const [latexError, setLatexError] = useState<string>("");
+  const [latexError, setLatexError] = useState<string | null>(null);
 
   const CANVAS_SIZE = 10000; // Large canvas size to simulate "infinite" space
 
@@ -292,8 +294,9 @@ const DrawingApp: React.FC = () => {
       // Process LaTeX response
       const latex = response.data.gemini_response || "";
       try {
-        setCleanedLatex(latex);
-        setLatexError("");
+        const cleaned = cleanGeminiResponse(latex);
+        setCleanedLatex(cleaned);
+        setLatexError(null);
       } catch (error) {
         console.error("Error processing LaTeX:", error);
         setLatexError("Error processing LaTeX.");
@@ -302,6 +305,7 @@ const DrawingApp: React.FC = () => {
     } catch (error) {
       console.error("Error sending lasso selection:", error);
       setGeminiResponse("Error processing the request.");
+      setLatexError("Error processing the request.");
     }
   };
 
@@ -421,10 +425,19 @@ const DrawingApp: React.FC = () => {
     } else if (drawingMode === 'eraser') {
       canvas.isDrawingMode = false;
       canvas.selection = false;
+      canvas.defaultCursor = 'crosshair';
       
-      const handleMouseDown = (options: any) => {
+      let isErasing = false;
+      let lastPoint: { x: number, y: number } | null = null;
+      
+      canvas.on('mouse:down', (options: any) => {
+        isErasing = true;
+        const pointer = canvas.getPointer(options.e);
+        lastPoint = pointer;
+        
+        // Check if clicked directly on an object
         const target = options.target;
-        if (target && target.type === 'path') {
+        if (target) {
           canvas.remove(target);
           canvas.renderAll();
           
@@ -436,8 +449,50 @@ const DrawingApp: React.FC = () => {
           setHistory(prev => [...prev.slice(0, historyIndex + 1), newState]);
           setHistoryIndex(prev => prev + 1);
         }
-      };
-      canvas.on('mouse:down', handleMouseDown);
+      });
+      
+      canvas.on('mouse:move', (options: any) => {
+        if (!isErasing || !lastPoint) return;
+        
+        const pointer = canvas.getPointer(options.e);
+        const objects = canvas.getObjects();
+        
+        // Set a threshold for eraser size
+        const eraserSize = brushSize * 2;
+        
+        // Check each object on the canvas
+        for (let i = objects.length - 1; i >= 0; i--) {
+          const obj = objects[i];
+          
+          // Skip non-drawing objects (like lasso elements)
+          if (obj.type === 'circle' && obj.fill === 'red') continue;
+          if (obj.type === 'line' && obj.strokeDashArray?.length === 2) continue;
+          if (obj === lassoPath.current) continue;
+          
+          // Simple hit detection - check if object is near the pointer
+          if (obj.containsPoint(pointer) || obj.isNear(pointer.x, pointer.y, eraserSize)) {
+            canvas.remove(obj);
+          }
+        }
+        
+        canvas.renderAll();
+        lastPoint = pointer;
+      });
+      
+      canvas.on('mouse:up', () => {
+        if (isErasing) {
+          isErasing = false;
+          lastPoint = null;
+          
+          const newState = JSON.stringify({
+            objects: canvas.toJSON().objects,
+            viewportTransform: canvas.viewportTransform
+          });
+          
+          setHistory(prev => [...prev.slice(0, historyIndex + 1), newState]);
+          setHistoryIndex(prev => prev + 1);
+        }
+      });
     } else if (drawingMode === 'selection') {
       canvas.isDrawingMode = false;
       canvas.selection = true;
@@ -623,8 +678,14 @@ const DrawingApp: React.FC = () => {
       if (historyIndex < history.length - 1) {
         setHistory(prev => prev.slice(0, historyIndex + 1));
       }
-      setHistory(prev => [...prev, canvasState]);
-      setHistoryIndex(prev => prev + 1);
+      setHistory(prev => {
+        const newHistory = [...prev, canvasState];
+        if (newHistory.length > MAX_HISTORY_SIZE) {
+          newHistory.shift(); // Remove the oldest state if history exceeds max size
+        }
+        return newHistory;
+      });
+      setHistoryIndex(prev => Math.min(prev + 1, MAX_HISTORY_SIZE - 1));
     };
 
     canvas.on('object:added', saveToHistory);
@@ -639,7 +700,8 @@ const DrawingApp: React.FC = () => {
   const handleUndo = () => {
     if (!canvas || historyIndex <= 0) return;
     
-    const newIndex = historyIndex - 1;
+    const newIndex = Math.max(historyIndex - 1, 0);
+    
     const previousState = JSON.parse(history[newIndex]);
     
     // Load objects
@@ -658,7 +720,8 @@ const DrawingApp: React.FC = () => {
   const handleRedo = () => {
     if (!canvas || historyIndex >= history.length - 1) return;
     
-    const newIndex = historyIndex + 1;
+    const newIndex = Math.min(historyIndex + 1, history.length - 1);
+    
     const nextState = JSON.parse(history[newIndex]);
     
     // Load objects
@@ -855,67 +918,13 @@ const DrawingApp: React.FC = () => {
         </div>
       </div>
 
-      {/* LaTeX Output Window */}
+      {/* Use the LatexOutputWindow component with close handler */}
       {showLatexOutput && (
-        <div className="latex-output-window">
-          <div className="latex-header">
-            <h3>LaTeX Output</h3>
-            <button 
-              className="btn btn-compact"
-              onClick={() => setShowLatexOutput(false)}
-              title="Close"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
-              </svg>
-            </button>
-          </div>
-          
-          <div className="latex-content">
-            {latexError ? (
-              <div className="error-container">
-                <p className="error-message">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" className="error-icon">
-                    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                    <path d="M7.002 11a1 1 0 1 1 2 0 1 1 0 0 1-2 0zM7.1 4.995a.905.905 0 1 1 1.8 0l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 4.995z"/>
-                  </svg>
-                  {latexError}
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="latex-preview">
-                  <BlockMath math={cleanedLatex} />
-                </div>
-                <div className="latex-code-container">
-                  <pre className="latex-code">{cleanedLatex}</pre>
-                  <button 
-                    className="btn btn-compact copy-btn"
-                    onClick={() => {
-                      navigator.clipboard.writeText(cleanedLatex);
-                      // Optional: Add visual feedback for copy
-                      const copyBtn = document.querySelector('.copy-btn');
-                      if (copyBtn) {
-                        const originalText = copyBtn.textContent;
-                        copyBtn.textContent = 'Copied!';
-                        setTimeout(() => {
-                          copyBtn.textContent = originalText;
-                        }, 1500);
-                      }
-                    }}
-                    title="Copy to clipboard"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                      <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
-                      <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
-                    </svg>
-                    Copy
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+        <LatexOutputWindow
+          latexError={latexError}
+          cleanedLatex={cleanedLatex}
+          onClose={() => setShowLatexOutput(false)}
+        />
       )}
 
       <div className="shortcuts">
