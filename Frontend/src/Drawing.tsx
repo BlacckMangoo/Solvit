@@ -10,7 +10,7 @@ import { cleanGeminiResponse } from './utils/cleanLatexResponse'; // Import the 
 
 
 const DrawingApp: React.FC = () => {
-  //JUST TESTING that giuthub qwworks or not 
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [canvas, setCanvas] = useState<any>(null);
