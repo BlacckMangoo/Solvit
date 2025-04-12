@@ -30,6 +30,15 @@ const DrawingApp: React.FC = () => {
   const [showLatexOutput, setShowLatexOutput] = useState<boolean>(false);
   const [cleanedLatex, setCleanedLatex] = useState<string>("");
   const [latexError, setLatexError] = useState<string | null>(null);
+  
+  // State for managing multiple LaTeX windows
+  const [latexWindows, setLatexWindows] = useState<Array<{
+    id: string;
+    latex: string;
+    error: string | null;
+    position: { x: number, y: number };
+  }>>([]);
+  const nextWindowIdRef = useRef<number>(1);
 
   const CANVAS_SIZE = 10000; // Large canvas size to simulate "infinite" space
 
@@ -205,6 +214,7 @@ const DrawingApp: React.FC = () => {
       setLatexError("Error processing the request.");
     }
   };
+
   useEffect(() => {
     if (!canvasRef.current || !fabric) return;
     
@@ -365,8 +375,38 @@ const DrawingApp: React.FC = () => {
           if (obj.type === 'line' && obj.strokeDashArray?.length === 2) continue;
           if (obj === lassoPath.current) continue;
           
-          // Simple hit detection - check if object is near the pointer
-          if (obj.containsPoint(pointer) || obj.isNear(pointer.x, pointer.y, eraserSize)) {
+          // Better hit detection implementation
+          let shouldErase = false;
+          
+          // First check: direct hit using containsPoint
+          if (obj.containsPoint && obj.containsPoint(pointer)) {
+            shouldErase = true;
+          } 
+          // Second check: for line objects with isNear method
+          else if (obj.isNear && obj.isNear(pointer.x, pointer.y, eraserSize)) {
+            shouldErase = true;
+          } 
+          // Third check: distance-based detection for other objects using bounding box
+          else {
+            const objBounds = obj.getBoundingRect();
+            const objCenter = {
+              x: objBounds.left + objBounds.width / 2,
+              y: objBounds.top + objBounds.height / 2
+            };
+            
+            // Calculate distance from pointer to object center
+            const dx = pointer.x - objCenter.x;
+            const dy = pointer.y - objCenter.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            // If distance is within eraser size + half of object's size, erase it
+            const objSize = Math.max(objBounds.width, objBounds.height) / 2;
+            if (distance < eraserSize + objSize) {
+              shouldErase = true;
+            }
+          }
+          
+          if (shouldErase) {
             canvas.remove(obj);
           }
         }
@@ -696,6 +736,87 @@ const DrawingApp: React.FC = () => {
     }
   }, [geminiResponse]);
 
+  // Function to add a new LaTeX window
+  const addLatexWindow = (latex: string, error: string | null = null) => {
+    // Generate random position slightly offset from center
+    const randomOffset = () => Math.random() * 100 - 50;
+    const centerX = window.innerWidth / 2 - 200 + randomOffset();
+    const centerY = window.innerHeight / 2 - 150 + randomOffset();
+    
+    const newId = nextWindowIdRef.current.toString();
+    nextWindowIdRef.current += 1;
+    
+    setLatexWindows(prev => [
+      ...prev,
+      {
+        id: newId,
+        latex,
+        error,
+        position: { x: centerX, y: centerY }
+      }
+    ]);
+    
+    return newId;
+  };
+
+  // Function to close a LaTeX window by id
+  const closeLatexWindow = (id: string) => {
+    setLatexWindows(prev => prev.filter(window => window.id !== id));
+  };
+
+  // Updated function to handle LaTeX conversion from lasso selection
+  const sendLassoSelectionToBackendMultiWindow = async () => {
+    if (!canvas || !lassoPath.current) return;
+  
+    // Prepare canvas - hide lasso elements
+    const bounds = lassoPath.current.getBoundingRect();
+    const lassoElements = canvas.getObjects().filter((obj: any) => {
+      return (obj.type === 'circle' && obj.fill === 'red') || 
+             (obj.type === 'line' && obj.strokeDashArray?.length === 2) ||
+             obj === lassoPath.current;
+    });
+  
+    lassoElements.forEach((obj: any) => {
+      obj.visible = false;
+    });
+    canvas.renderAll();
+  
+    // Get image data
+    const dataUrl = canvas.toDataURL({
+      format: "png",
+      left: bounds.left,
+      top: bounds.top,
+      width: bounds.width,
+      height: bounds.height,
+    });
+  
+    // Show lasso elements again
+    lassoElements.forEach((obj: any) => {
+      obj.visible = true;
+    });
+    canvas.renderAll();
+  
+    // Use the service function
+    const response = await sendLassoSelectionImage(dataUrl);
+    
+    if (response.success) {
+      try {
+        const cleaned = cleanGeminiResponse(response.geminiResponse);
+        addLatexWindow(cleaned);
+      } catch (error) {
+        console.error("Error processing LaTeX:", error);
+        addLatexWindow("", "Error processing LaTeX.");
+      }
+    } else {
+      addLatexWindow("", "Error processing the request.");
+    }
+
+    // Remove lasso selection elements and reset lasso state after conversion
+    removeAllLassoElements();
+    // Switch back to pencil mode
+    handleSetDrawingMode('pencil');
+  };
+
   return (
 
     <>
@@ -797,11 +918,17 @@ const DrawingApp: React.FC = () => {
             <button className="btn btn-compact" onClick={handlePngDownload} title="Download PNG">
               <DownloadIcon />
             </button>
-            <button className="btn btn-compact" onClick={sendLassoSelectionToBackend} title="Convert to LaTeX">
+            <button 
+              className="btn btn-compact" 
+              onClick={sendLassoSelectionToBackendMultiWindow} 
+              title="Convert to LaTeX"
+            >
               <ConvertIcon />
             </button>
           </div>
         )}
+        
+       
 
       </div>
 
@@ -814,14 +941,27 @@ const DrawingApp: React.FC = () => {
         </div>
       </div>
 
-      {/* Use the LatexOutputWindow component with close handler */}
+      {/* Legacy LaTeX window - keeping for backward compatibility */}
       {showLatexOutput && (
         <LatexOutputWindow
+          id="default"
           latexError={latexError}
           cleanedLatex={cleanedLatex}
           onClose={() => setShowLatexOutput(false)}
         />
       )}
+
+      {/* Render multiple LaTeX windows */}
+      {latexWindows.map(window => (
+        <LatexOutputWindow
+          key={window.id}
+          id={window.id}
+          latexError={window.error}
+          cleanedLatex={window.latex}
+          initialPosition={window.position}
+          onClose={() => closeLatexWindow(window.id)}
+        />
+      ))}
 
       <div className="shortcuts">
         Keyboard shortcuts: <kbd className='text-blue-200'>Ctrl</kbd> + <kbd>Z</kbd> for Undo, <kbd>Ctrl</kbd> + <kbd>Y</kbd> for Redo, <kbd>Space</kbd> (hold) for Pan
